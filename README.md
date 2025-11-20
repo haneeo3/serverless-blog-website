@@ -63,14 +63,12 @@ serverless-blog-website/
 │
 ├── frontend/
 │   ├── index.html
-│   ├── style.css
-│   └── app.js
-│
+│  
 └── backend/
     ├── create_post.py         # Lambda: Save post to DynamoDB
     ├── get_posts.py           # Lambda: Fetch all posts
     ├── upload_image.py        # Lambda: Upload to S3 (if using Lambda upload)
-    └── utils/                 # (optional helpers)
+    
 ```
 
 ---
@@ -138,7 +136,7 @@ All requests go through **API Gateway REST API** using **Lambda Proxy Integratio
 
 ---
 
-## 🔐 IAM Permissions (What You *Actually* Used)
+## 🔐 IAM Permissions
 
 The Lambda execution role must allow:
 
