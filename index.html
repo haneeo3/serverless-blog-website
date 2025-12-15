@@ -5,20 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>My Cloud Blog</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
-
 <style>
 body { margin: 0; font-family: "Inter", sans-serif; background: #f5f7fa; color: #111; }
-header { padding: 20px; background: #1f2937; color: white; text-align: center; font-size: 26px; font-weight: 700; }
+header { padding: 20px; background: #1f2937; color: white; text-align: center; font-size: 26px; font-weight: 700; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
 .container { max-width: 900px; margin: 40px auto; padding: 20px; }
 .card { background: white; padding: 20px; border-radius: 14px; box-shadow: 0 3px 15px rgba(0,0,0,0.1); margin-bottom: 30px; }
-input, textarea { width: 100%; padding: 12px; margin-top: 8px; border-radius: 10px; border: 1px solid #ccc; }
-button { background: #2563eb; color: white; padding: 12px 20px; border-radius: 10px; font-size: 16px; cursor: pointer; width: 100%; }
-.post { margin-bottom: 40px; background: white; border-radius: 14px; box-shadow: 0 3px 12px rgba(0,0,0,0.1); }
+input, textarea { width: 100%; padding: 12px; margin-top: 8px; border-radius: 10px; border: 1px solid #ccc; font-size: 15px; }
+button { background: #2563eb; color: white; padding: 12px 20px; border: none; border-radius: 10px; font-size: 16px; cursor: pointer; margin-top: 12px; width: 100%; font-weight: 600; }
+button:hover { background: #1d4ed8; }
+.post { margin-bottom: 40px; border-radius: 14px; overflow: hidden; background: white; box-shadow: 0 3px 12px rgba(0,0,0,0.1); }
 .post img { width: 100%; max-height: 350px; object-fit: cover; }
 .post-content { padding: 20px; }
 .post-title { font-size: 22px; font-weight: 700; }
+.post-text { margin-top: 10px; font-size: 15px; line-height: 1.6; }
 .date { margin-top: 5px; color: #555; font-size: 14px; }
-.post-text { margin-top: 12px; }
+@media(max-width:600px){.post-title{font-size:18px;}}
 </style>
 </head>
 <body>
@@ -26,92 +27,117 @@ button { background: #2563eb; color: white; padding: 12px 20px; border-radius: 1
 <header>My Cloud Blog</header>
 <div class="container">
 
+<!-- CREATE POST -->
 <div class="card">
 <h2>Create New Post</h2>
-
 <label>Title</label>
 <input id="title">
-
 <label>Content</label>
 <textarea id="content" rows="4"></textarea>
-
 <label>Image</label>
 <input type="file" id="imageInput" accept="image/*">
-
 <button onclick="submitPost()">Publish Post</button>
 </div>
 
+<!-- POSTS DISPLAY -->
 <h2>Latest Posts</h2>
 <div id="posts"></div>
 
-</div>
-
 <script>
-const API = "API_URL_HERE";
+const API = "https://csgg9gsuqj.execute-api.us-east-1.amazonaws.com/prod";
 
-async function parseResponse(res) {
-    const json = await res.json();
-    return json.body ? JSON.parse(json.body) : json;
+// Helper: parse Lambda Proxy response
+async function parseLambdaResponse(res) {
+  const json = await res.json();
+  if (json.body) return JSON.parse(json.body);
+  return json;
 }
 
+// Upload image to S3 using a pre-signed URL
 async function uploadImage(file) {
-    const res = await fetch(`${API}/upload-url`);
-    const data = await parseResponse(res);
+  const res = await fetch(`${API}/upload-url`);
+  if (!res.ok) throw new Error(`Failed to get upload URL: ${res.status}`);
+  
+  const data = await parseLambdaResponse(res);
+  const uploadUrl = data.uploadUrl;
+  const imageUrl = data.imageUrl;
 
-    const uploadUrl = data.uploadUrl;
-    const imgUrl = data.imageUrl;
+  const uploadRes = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": file.type },
+    body: file
+  });
+  if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.status}`);
 
-    await fetch(uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": file.type },
-        body: file
-    });
-
-    return imgUrl;
+  return imageUrl;
 }
 
+// Submit a new post
 async function submitPost() {
-    const title = titleInput.value.trim();
-    const content = contentInput.value.trim();
-    const file = imageInput.files[0];
+  const title = document.getElementById("title").value.trim();
+  const content = document.getElementById("content").value.trim();
+  const imageFile = document.getElementById("imageInput").files[0];
 
-    if (!title || !content || !file) {
-        alert("All fields are required.");
-        return;
-    }
+  if (!title || !content || !imageFile) {
+    alert("Please fill all fields and select an image.");
+    return;
+  }
 
-    const imageUrl = await uploadImage(file);
+  try {
+    const imageUrl = await uploadImage(imageFile);
 
-    const res = await fetch(`${API}/create-post`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, content, imageUrl })
+    const postBody = { title, content, imageUrl };
+    const postRes = await fetch(`${API}/create-post`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(postBody)
     });
+    if (!postRes.ok) throw new Error(`Post creation failed: ${postRes.status}`);
 
-    await loadPosts();
+    const result = await parseLambdaResponse(postRes);
+    console.log("Post saved:", result);
+
+    alert("Post published successfully!");
+    document.getElementById("title").value = "";
+    document.getElementById("content").value = "";
+    document.getElementById("imageInput").value = "";
+
+    loadPosts();
+  } catch (err) {
+    console.error("Post submission failed:", err);
+    alert("Failed to publish post. Check console for details.");
+  }
 }
 
+// Load all posts from DynamoDB via Lambda
 async function loadPosts() {
-    const res = await fetch(`${API}/get-posts`);
-    const posts = await parseResponse(res);
+  try {
+    const res = await fetch(`${API}/posts`);
+    if (!res.ok) throw new Error(`Failed to load posts: ${res.status}`);
 
+    const posts = await parseLambdaResponse(res);
     const container = document.getElementById("posts");
     container.innerHTML = "";
-
-    posts.reverse().forEach(post => {
-        container.innerHTML += `
-            <div class="post">
-                <img src="${post.imageUrl}">
-                <div class="post-content">
-                    <div class="post-title">${post.title}</div>
-                    <div class="date">${new Date(post.createdAt).toLocaleString()}</div>
-                    <div class="post-text">${post.content}</div>
-                </div>
-            </div>
-        `;
+    
+    posts.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt))
+         .forEach(p => {
+      container.innerHTML += `
+        <div class="post">
+          <img src="${p.imageUrl}" alt="">
+          <div class="post-content">
+            <div class="post-title">${p.title}</div>
+            <div class="date">${new Date(p.createdAt).toLocaleString()}</div>
+            <div class="post-text">${p.content}</div>
+          </div>
+        </div>
+      `;
     });
+  } catch (err) {
+    console.error("Failed to load posts:", err);
+  }
 }
 
+// Initial load
 loadPosts();
 </script>
 
